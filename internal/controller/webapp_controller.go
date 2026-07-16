@@ -76,10 +76,7 @@ func (r *WebAppReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, err
 	}
 
-	needsUpdate := false
-	if existing.Spec.Replicas == nil || *existing.Spec.Replicas != *desired.Spec.Replicas {
-		needsUpdate = true
-	}
+	needsUpdate := existing.Spec.Replicas == nil || *existing.Spec.Replicas != *desired.Spec.Replicas
 	if len(existing.Spec.Template.Spec.Containers) > 0 && existing.Spec.Template.Spec.Containers[0].Image != desired.Spec.Template.Spec.Containers[0].Image {
 		needsUpdate = true
 	}

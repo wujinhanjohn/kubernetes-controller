@@ -37,7 +37,7 @@ type WebAppSpec struct {
 
 // WebAppStatus defines the observed state of WebApp.
 type WebAppStatus struct {
-	//+optional
+	// +optional
 	AvailableReplicas int32 `json:"availableReplicas,omitempty"`
 	// For Kubernetes API conventions, see:
 	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties
