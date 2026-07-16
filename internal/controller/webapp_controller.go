@@ -104,6 +104,10 @@ func (r *WebAppReconciler) buildDeployment(webapp *appsv1.WebApp) *kappsv1.Deplo
 	if replicas == 0 {
 		replicas = 1
 	}
+	port := webapp.Spec.Port
+	if port == 0 {
+		port = 8080
+	}
 	labels := map[string]string{"app": webapp.Name}
 
 	return &kappsv1.Deployment{
@@ -120,7 +124,7 @@ func (r *WebAppReconciler) buildDeployment(webapp *appsv1.WebApp) *kappsv1.Deplo
 					Containers: []corev1.Container{{
 						Name:  "app",
 						Image: webapp.Spec.Image,
-						Ports: []corev1.ContainerPort{{ContainerPort: webapp.Spec.Port}},
+						Ports: []corev1.ContainerPort{{ContainerPort: port}},
 					}},
 				},
 			},

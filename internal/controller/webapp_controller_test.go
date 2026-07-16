@@ -21,6 +21,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	kappsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -33,6 +34,9 @@ import (
 var _ = Describe("WebApp Controller", func() {
 	Context("When reconciling a resource", func() {
 		const resourceName = "test-resource"
+		const resourceImage = "nginx:latest"
+		const resourcePort = int32(8080)
+		const resourceReplicas = int32(2)
 
 		ctx := context.Background()
 
@@ -51,7 +55,11 @@ var _ = Describe("WebApp Controller", func() {
 						Name:      resourceName,
 						Namespace: "default",
 					},
-					// TODO(user): Specify other spec details if needed.
+					Spec: appsv1.WebAppSpec{
+						Image:    resourceImage,
+						Replicas: resourceReplicas,
+						Port:     resourcePort,
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}
@@ -77,8 +85,17 @@ var _ = Describe("WebApp Controller", func() {
 				NamespacedName: typeNamespacedName,
 			})
 			Expect(err).NotTo(HaveOccurred())
-			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
-			// Example: If you expect a certain status condition after reconciliation, verify it here.
+
+			By("checking that a Deployment was created with the desired spec")
+			deployment := &kappsv1.Deployment{}
+			Expect(k8sClient.Get(ctx, typeNamespacedName, deployment)).To(Succeed())
+			Expect(deployment.Spec.Replicas).NotTo(BeNil())
+			Expect(*deployment.Spec.Replicas).To(Equal(resourceReplicas))
+			Expect(deployment.Spec.Template.Spec.Containers).To(HaveLen(1))
+			container := deployment.Spec.Template.Spec.Containers[0]
+			Expect(container.Image).To(Equal(resourceImage))
+			Expect(container.Ports).To(HaveLen(1))
+			Expect(container.Ports[0].ContainerPort).To(Equal(resourcePort))
 		})
 	})
 })

@@ -1,8 +1,19 @@
 # webapp-operator
-// TODO(user): Add simple overview of use/purpose
+A Kubernetes operator that manages `WebApp` custom resources, reconciling each one into a standard Deployment so you can run a container-based web application by declaring just its image, replica count, and port.
 
 ## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+webapp-operator introduces a namespaced `WebApp` custom resource (API group `apps.example.com/v1`) as a thin, opinionated abstraction over a Kubernetes Deployment.
+Instead of authoring and maintaining a full Deployment spec, you declare only the three fields that matter for a simple web workload:
+
+- `image` (required): the container image to run.
+- `replicas` (defaults to `1`): the desired number of Pod replicas.
+- `port` (defaults to `8080`): the container port the application listens on.
+
+The controller watches `WebApp` objects and continuously reconciles the cluster toward the declared state.
+For each `WebApp` it creates a Deployment of the same name, owned by the `WebApp` (via a controller reference) so that deleting the `WebApp` garbage-collects the Deployment.
+On subsequent reconciles it compares the live Deployment against the desired spec and updates it when the replica count or image drifts, then writes the Deployment's available replica count back to the `WebApp`'s `status.availableReplicas`.
+
+This makes `WebApp` a self-contained, declarative way to run and scale a stateless web service, and a compact reference for how a Kubebuilder-based operator maps a custom resource onto built-in workload objects.
 
 ## Getting Started
 
