@@ -20,18 +20,23 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
-
-// WebAppSpec defines the desired state of WebApp
+// WebAppSpec defines the desired state of WebApp.
 type WebAppSpec struct {
+	// image is the container image the WebApp runs.
 	// +kubebuilder:validation:Required
 	Image string `json:"image"`
+
+	// replicas is the desired number of Pod replicas. Defaults to 1.
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:default=1
+	// +optional
 	Replicas int32 `json:"replicas"`
+
+	// port is the container port the application listens on. Defaults to 8080.
 	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=65535
 	// +kubebuilder:default=8080
+	// +optional
 	Port int32 `json:"port"`
 }
 
@@ -59,6 +64,10 @@ type WebAppStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Image",type=string,JSONPath=`.spec.image`
+// +kubebuilder:printcolumn:name="Replicas",type=integer,JSONPath=`.spec.replicas`
+// +kubebuilder:printcolumn:name="Available",type=integer,JSONPath=`.status.availableReplicas`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // WebApp is the Schema for the webapps API
 type WebApp struct {

@@ -14,7 +14,20 @@ spec:
     singular: webapp
   scope: Namespaced
   versions:
-  - name: v1
+  - additionalPrinterColumns:
+    - jsonPath: .spec.image
+      name: Image
+      type: string
+    - jsonPath: .spec.replicas
+      name: Replicas
+      type: integer
+    - jsonPath: .status.availableReplicas
+      name: Available
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1
     schema:
       openAPIV3Schema:
         description: WebApp is the Schema for the webapps API
@@ -40,21 +53,25 @@ spec:
             description: spec defines the desired state of WebApp
             properties:
               image:
+                description: image is the container image the WebApp runs.
                 type: string
               port:
                 default: 8080
+                description: port is the container port the application listens on.
+                  Defaults to 8080.
                 format: int32
+                maximum: 65535
                 minimum: 0
                 type: integer
               replicas:
                 default: 1
+                description: replicas is the desired number of Pod replicas. Defaults
+                  to 1.
                 format: int32
                 minimum: 0
                 type: integer
             required:
             - image
-            - port
-            - replicas
             type: object
           status:
             description: status defines the observed state of WebApp

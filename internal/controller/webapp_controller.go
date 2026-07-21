@@ -18,10 +18,12 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	kappsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -29,6 +31,18 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	appsv1 "github.com/wujinhanjohn/webapp-operator/api/v1"
+)
+
+const (
+	// defaultReplicas is used when a WebApp does not specify a replica count.
+	defaultReplicas int32 = 1
+	// defaultPort is used when a WebApp does not specify a container port.
+	defaultPort int32 = 8080
+	// containerName is the name of the single container in the managed Deployment.
+	containerName = "app"
+	// conditionAvailable reports whether the managed Deployment has reached its
+	// desired replica count.
+	conditionAvailable = "Available"
 )
 
 // WebAppReconciler reconciles a WebApp object
@@ -42,12 +56,11 @@ type WebAppReconciler struct {
 // +kubebuilder:rbac:groups=apps.example.com,resources=webapps/finalizers,verbs=update
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 
-// Reconcile is part of the main kubernetes reconciliation loop which aims to
-// move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the WebApp object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
+// Reconcile drives the cluster toward the state declared by a WebApp. It
+// ensures a Deployment of the same name exists and owned by the WebApp,
+// reconciles the Deployment's replica count and container image when they
+// drift from the spec, and mirrors the Deployment's availability back into the
+// WebApp's status (available replica count and the "Available" condition).
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.23.3/pkg/reconcile
@@ -56,54 +69,91 @@ func (r *WebAppReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	var webapp appsv1.WebApp
 	if err := r.Get(ctx, req.NamespacedName, &webapp); err != nil {
+		// The WebApp was deleted; owned Deployments are garbage-collected.
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	desired := r.buildDeployment(&webapp)
 
+	desired := r.buildDeployment(&webapp)
 	if err := ctrl.SetControllerReference(&webapp, desired, r.Scheme); err != nil {
 		return ctrl.Result{}, err
 	}
 
 	var existing kappsv1.Deployment
 	err := r.Get(ctx, req.NamespacedName, &existing)
-	if err != nil && apierrors.IsNotFound(err) {
-		logger.Info("Creating new deployment", "name", req.Name)
+	switch {
+	case apierrors.IsNotFound(err):
+		logger.Info("Creating Deployment", "name", desired.Name)
 		if err := r.Create(ctx, desired); err != nil {
 			return ctrl.Result{}, err
 		}
-		return ctrl.Result{}, nil
-	} else if err != nil {
+		// A freshly created Deployment reports no available replicas yet.
+		return ctrl.Result{}, r.updateStatus(ctx, &webapp, 0, *desired.Spec.Replicas)
+	case err != nil:
 		return ctrl.Result{}, err
 	}
 
-	needsUpdate := existing.Spec.Replicas == nil || *existing.Spec.Replicas != *desired.Spec.Replicas
-	if len(existing.Spec.Template.Spec.Containers) > 0 && existing.Spec.Template.Spec.Containers[0].Image != desired.Spec.Template.Spec.Containers[0].Image {
-		needsUpdate = true
-	}
-	if needsUpdate {
-		logger.Info("Update Deployment", "name", desired.Name)
+	if deploymentNeedsUpdate(&existing, desired) {
+		logger.Info("Updating Deployment", "name", desired.Name)
 		existing.Spec = desired.Spec
 		if err := r.Update(ctx, &existing); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
 
-	webapp.Status.AvailableReplicas = existing.Status.AvailableReplicas
-	if err := r.Status().Update(ctx, &webapp); err != nil {
-		return ctrl.Result{}, err
+	return ctrl.Result{}, r.updateStatus(ctx, &webapp, existing.Status.AvailableReplicas, *desired.Spec.Replicas)
+}
+
+// updateStatus writes the observed availability back to the WebApp, but only
+// issues an API call when the status actually changed, avoiding needless writes
+// and status-update conflict churn on otherwise no-op reconciles.
+func (r *WebAppReconciler) updateStatus(ctx context.Context, webapp *appsv1.WebApp, available, desired int32) error {
+	changed := webapp.Status.AvailableReplicas != available
+	webapp.Status.AvailableReplicas = available
+
+	condition := metav1.Condition{
+		Type:    conditionAvailable,
+		Status:  metav1.ConditionTrue,
+		Reason:  "MinimumReplicasAvailable",
+		Message: fmt.Sprintf("%d/%d replicas are available", available, desired),
+	}
+	if available < desired {
+		condition.Status = metav1.ConditionFalse
+		condition.Reason = "MinimumReplicasUnavailable"
+	}
+	if meta.SetStatusCondition(&webapp.Status.Conditions, condition) {
+		changed = true
 	}
 
-	return ctrl.Result{}, nil
+	if !changed {
+		return nil
+	}
+	return r.Status().Update(ctx, webapp)
+}
+
+// deploymentNeedsUpdate reports whether the live Deployment has drifted from
+// the desired spec in the fields this controller manages: replica count and
+// the application container image.
+func deploymentNeedsUpdate(existing, desired *kappsv1.Deployment) bool {
+	if existing.Spec.Replicas == nil || *existing.Spec.Replicas != *desired.Spec.Replicas {
+		return true
+	}
+	if len(existing.Spec.Template.Spec.Containers) == 0 {
+		return true
+	}
+	return existing.Spec.Template.Spec.Containers[0].Image != desired.Spec.Template.Spec.Containers[0].Image
 }
 
 func (r *WebAppReconciler) buildDeployment(webapp *appsv1.WebApp) *kappsv1.Deployment {
+	// The CRD sets these defaults for objects created through the API server;
+	// re-applying them here keeps buildDeployment correct for direct callers
+	// (e.g. unit tests) that construct a WebApp struct without the API defaults.
 	replicas := webapp.Spec.Replicas
 	if replicas == 0 {
-		replicas = 1
+		replicas = defaultReplicas
 	}
 	port := webapp.Spec.Port
 	if port == 0 {
-		port = 8080
+		port = defaultPort
 	}
 	labels := map[string]string{"app": webapp.Name}
 
@@ -119,7 +169,7 @@ func (r *WebAppReconciler) buildDeployment(webapp *appsv1.WebApp) *kappsv1.Deplo
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{{
-						Name:  "app",
+						Name:  containerName,
 						Image: webapp.Spec.Image,
 						Ports: []corev1.ContainerPort{{ContainerPort: port}},
 					}},
